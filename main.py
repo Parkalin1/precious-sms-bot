@@ -3,7 +3,7 @@ from threading import Thread
 from flask import Flask
 
 TOKEN = os.environ.get("BOT_TOKEN")
-SIM5 = (os.environ.get("5SIM_KEY") or os.environ.get("SMS_KEY") or "").strip()
+SIM5 = (os.environ.get("SIM5_KEY") or os.environ.get("SMS_KEY") or "").strip()
 API = f"https://api.telegram.org/bot{TOKEN}"
 BASE = "https://5sim.net/v1"
 HEADERS = {"Authorization": f"Bearer {SIM5}", "Accept": "application/json"}
