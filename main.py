@@ -6,101 +6,99 @@ TOKEN = os.environ.get("BOT_TOKEN")
 HERO_KEY = os.environ.get("HERO_KEY")
 
 API = f"https://api.telegram.org/bot{TOKEN}"
-SMS_API = "https://api.hero-sms.com/stubs/handler_api.php"
 
-def send(chat_id, text):
-    requests.post(f"{API}/sendMessage", json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"}, timeout=15)
+APIS = [
+    "https://api.smshero.com/stubs/handler_api.php",
+    "https://api.sms-activate.org/stubs/handler_api.php",
+    "https://smshero.com/stubs/handler_api.php",
+    "https://api.sms-activate.ae/stubs/handler_api.php"
+]
 
-def hero(action):
-    url = f"{SMS_API}?api_key={HERO_KEY}&{action}"
+def send(cid, txt):
     try:
-        r = requests.get(url, timeout=20).text.strip()
-        print(f"HEROSMS: {action} => {r}")
-        return r
-    except Exception as e:
-        return f"ERROR {e}"
+        requests.post(f"{API}/sendMessage", json={"chat_id": cid, "text": txt, "parse_mode": "HTML"}, timeout=15)
+    except: pass
 
-def bot():
-    print("SMSHero BOT STARTED")
-    offset = 0
-    orders = {} # chat_id: order_id
+def hero_call(action):
+    for base in APIS:
+        try:
+            url = f"{base}?api_key={HERO_KEY}&{action}"
+            r = requests.get(url, timeout=15).text.strip()
+            print(f"TRY {base} => {r[:150]}")
+            if r and "Name or service" not in r and "HTTP" not in r[:10]:
+                if "ACCESS_" in r or "STATUS_" in r or "BALANCE" in r or r.replace(".","",1).isdigit():
+                    return r
+                if len(r) < 200:
+                    return r
+        except Exception as e:
+            print(f"fail {base}: {e}")
+            continue
+    return "ERROR: All API domains failed - check HERO_KEY"
 
+def bot_loop():
+    print("BOT LIVE WITH MULTI-API")
+    offset=0
+    orders={}
     while True:
         try:
             res = requests.get(f"{API}/getUpdates?offset={offset}&timeout=30", timeout=35).json()
-            for u in res.get("result", []):
-                offset = u["update_id"] + 1
+            for u in res.get("result",[]):
+                offset = u["update_id"]+1
                 if "message" not in u: continue
-
                 cid = u["message"]["chat"]["id"]
-                text = u["message"].get("text","").strip()
+                txt = u["message"].get("text","").strip()
 
-                # /start
-                if text.startswith("/start"):
-                    send(cid, "<b>Welcome to Precious SMSHero Bot</b> ✅\n\n"
-                              "/balance - Check money\n"
-                              "/buy - Buy Nigeria WhatsApp (N19)\n"
-                              "/buy wa 0 - Buy Russia ($0.15)\n"
-                              "/code - Get OTP code\n"
-                              "/cancel - Cancel and refund")
+                if txt.startswith("/start"):
+                    send(cid, "<b>Precious SMS Bot FIXED ✅</b>\n\n/balance - check money\n/buy - buy Nigeria number (19)\n/buy wa 0 - Russia cheap\n/code - get OTP\n/cancel - cancel")
 
-                # /balance
-                elif text.startswith("/balance"):
-                    b = hero("action=getBalance")
-                    send(cid, f"💰 Balance: {b}")
+                elif "/balance" in txt:
+                    b = hero_call("action=getBalance")
+                    send(cid, f"💰 Balance: {b}\n\nIf $0, you need fund am!")
 
-                # /buy
-                elif text.startswith("/buy"):
-                    parts = text.split()
-                    service = parts[1] if len(parts)>1 else "wa"
-                    country = parts[2] if len(parts)>2 else "19"
-
-                    send(cid, f"⏳ Buying {service} for country {country}... wait")
-                    result = hero(f"action=getNumber&service={service}&country={country}")
-
-                    if "ACCESS_NUMBER" in result:
-                        _, oid, num = result.split(":")
-                        orders[cid] = oid
-                        send(cid, f"✅ <b>NUMBER:</b> <code>{num}</code>\n"
-                                   f"ID: {oid}\n\n"
-                                   f"Go put am for WhatsApp now.\n"
-                                   f"Then send /code here to get OTP")
+                elif txt.startswith("/buy"):
+                    parts = txt.split()
+                    if len(parts)==2 and parts[1]=="ng":
+                        service="wa"; country="19"
                     else:
-                        send(cid, f"❌ Failed: {result}\nTry /buy wa 0 or check /balance")
+                        service = parts[1] if len(parts)>1 else "wa"
+                        country = parts[2] if len(parts)>2 else "19"
 
-                # /code
-                elif text.startswith("/code") or text.startswith("/otp"):
+                    send(cid, f"⏳ Buying {service} country {country}...")
+                    r = hero_call(f"action=getNumber&service={service}&country={country}")
+                    if "ACCESS_NUMBER" in r:
+                        _, oid, num = r.split(":")
+                        orders[cid]=oid
+                        send(cid, f"✅ Number: <code>{num}</code>\nID: {oid}\n\nUse am for WhatsApp then /code")
+                    else:
+                        send(cid, f"❌ {r}\n\nIf NO_BALANCE, fund $1 first. If NO_NUMBERS, try /buy wa 0")
+
+                elif txt.startswith("/code"):
                     oid = orders.get(cid)
                     if not oid:
-                        send(cid, "You never buy number. Do /buy first")
-                        continue
-                    s = hero(f"action=getStatus&id={oid}")
-                    if "STATUS_OK" in s:
-                        code = s.split(":")[1]
-                        send(cid, f"🎉 <b>CODE: <code>{code}</code></b>")
-                    elif "STATUS_WAIT" in s:
-                        send(cid, "⏳ OTP never come yet. Wait 10 secs then do /code again")
+                        send(cid, "No order, do /buy first")
                     else:
-                        send(cid, f"Status: {s}")
+                        s = hero_call(f"action=getStatus&id={oid}")
+                        if "STATUS_OK" in s:
+                            code = s.split(":")[1]
+                            send(cid, f"🎉 CODE: <code>{code}</code>")
+                        elif "WAIT" in s:
+                            send(cid, "⏳ Waiting... try /code again after 10sec")
+                        else:
+                            send(cid, f"Status: {s}")
 
-                # /cancel
-                elif text.startswith("/cancel"):
+                elif txt.startswith("/cancel"):
                     oid = orders.get(cid)
                     if oid:
-                        hero(f"action=setStatus&status=8&id={oid}")
-                        send(cid, "Cancelled - money refunded")
-                        orders.pop(cid)
-                    else:
-                        send(cid, "No order")
+                        hero_call(f"action=setStatus&status=8&id={oid}")
+                        send(cid, "Cancelled & refunded")
+                        orders.pop(cid, None)
 
         except Exception as e:
-            print("error", e)
+            print("loop err", e)
             time.sleep(2)
 
 app = Flask(__name__)
 @app.route("/")
-def home():
-    return "SMSHero Bot Running"
-
-Thread(target=bot, daemon=True).start()
-app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+def home(): return "OK"
+Thread(target=bot_loop, daemon=True).start()
+app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
