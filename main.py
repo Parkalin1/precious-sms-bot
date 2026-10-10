@@ -4,7 +4,7 @@ import time
 from flask import Flask
 from threading import Thread
 
-TOKEN = os.environ.get("8969960572:AAFsT3GnBO7FnssfwBrSQUykSPZ6VIbnUcQ")
+TOKEN = os.environ.get("BOT_TOKEN")
 API = f"https://api.telegram.org/bot{TOKEN}"
 
 def send_msg(chat_id, text):
