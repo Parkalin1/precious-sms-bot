@@ -13,11 +13,11 @@ bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 app = Flask(__name__)
 
 BASE = "https://5sim.net/v1"
+user_orders = {}
 
 def get_headers():
-    key = os.getenv("SIM5_KEY", "").strip()
     return {
-        "Authorization": f"Bearer {key}",
+        "Authorization": f"Bearer {os.getenv('SIM5_KEY','').strip()}",
         "Accept": "application/json"
     }
 
@@ -34,19 +34,56 @@ def get_sms(order_id):
     r = requests.get(url, headers=get_headers(), timeout=20)
     return r.json()
 
+def cancel_order(order_id):
+    url = f"{BASE}/user/cancel/{order_id}"
+    r = requests.get(url, headers=get_headers(), timeout=20)
+    return r.text
+
+def get_balance():
+    url = f"{BASE}/user/profile"
+    r = requests.get(url, headers=get_headers(), timeout=20)
+    if r.status_code == 200:
+        try:
+            return r.json().get("balance")
+        except:
+            return None
+    return None
+
 @app.route("/")
 def home():
     return "Bot is Live"
 
 @bot.message_handler(commands=['start'])
 def start(m):
+    bal = get_balance()
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("🇺🇸 USA", "🇨🇦 Canada", "🇦🇷 Argentina", "🇧🇷 Brazil")
-    bot.send_message(m.chat.id, "Welcome! Choose country:", reply_markup=markup)
+    markup.add("💰 Balance", "❌ Cancel")
+    txt = f"Welcome! Balance: ${bal}\nChoose country:" if bal is not None else "Welcome! Choose country:"
+    bot.send_message(m.chat.id, txt, reply_markup=markup)
+
+@bot.message_handler(commands=['cancel'])
+def cancel_cmd(m):
+    order_id = user_orders.get(m.chat.id)
+    if not order_id:
+        bot.send_message(m.chat.id, "No active order to cancel")
+        return
+    res = cancel_order(order_id)
+    user_orders.pop(m.chat.id, None)
+    bot.send_message(m.chat.id, f"Cancelled order {order_id}\n{res[:200]}")
 
 @bot.message_handler(func=lambda m: True)
 def handle(m):
     text = m.text.lower()
+
+    if "balance" in text:
+        bal = get_balance()
+        bot.send_message(m.chat.id, f"Your 5SIM Balance: ${bal}")
+        return
+
+    if "cancel" in text:
+        return cancel_cmd(m)
+
     if "usa" in text:
         country = "usa"
     elif "canada" in text:
@@ -56,7 +93,7 @@ def handle(m):
     elif "brazil" in text:
         country = "brazil"
     else:
-        country = "usa"
+        return
 
     bot.send_message(m.chat.id, f"Buying {country} number...")
 
@@ -64,17 +101,19 @@ def handle(m):
         data = buy_number(country)
         phone = data.get("phone")
         order_id = data.get("id")
-        bot.send_message(m.chat.id, f"Number: {phone}\nOrder ID: {order_id}\nWaiting for code...")
+        user_orders[m.chat.id] = order_id
+        bot.send_message(m.chat.id, f"Number: {phone}\nOrder ID: {order_id}\nWaiting for code...\nSend ❌ Cancel if you want to cancel")
 
         for i in range(60):
             time.sleep(5)
             check = get_sms(order_id)
             sms = check.get("sms")
             if sms:
+                user_orders.pop(m.chat.id, None)
                 bot.send_message(m.chat.id, f"CODE: {sms}")
                 return
 
-        bot.send_message(m.chat.id, "No code yet, try /start again")
+        bot.send_message(m.chat.id, "No code yet. Send /cancel to cancel and get refund")
 
     except Exception as e:
         bot.send_message(m.chat.id, f"Error: {e}")
