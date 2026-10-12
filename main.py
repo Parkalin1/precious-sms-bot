@@ -32,7 +32,6 @@ def tg_send(chat_id, text):
         return False
 
 def buy_5sim():
-    # try EU countries
     for country in EU:
         try:
             r = requests.get(f"{BASE}/user/buy/activation/country/{country}/operator/any/product/whatsapp", headers=H, timeout=20)
@@ -42,7 +41,7 @@ def buy_5sim():
     return None
 
 def check_5sim(id):
-    for _ in range(9): # wait 3 mins for SMS
+    for _ in range(9):
         time.sleep(20)
         try:
             r = requests.get(f"{BASE}/user/check/{id}", headers=H, timeout=20).json()
@@ -63,34 +62,27 @@ def verify(ref):
     ok, data = verify_paystack(ref)
     if not ok:
         return jsonify({"status":"failed"})
-
     tg_user = data['metadata'].get('telegram')
     trans_id = data['id']
-
     bought = buy_5sim()
     if not bought:
         refund_paystack(trans_id)
         if tg_user: tg_send(tg_user, "❌ 5sim no get number now, your money don REFUND. Try again later.")
         return jsonify({"status":"refunded", "reason":"no number"})
-
     result = check_5sim(bought['id'])
     if not result:
-        # cancel 5sim order
         try: requests.get(f"{BASE}/user/cancel/{bought['id']}", headers=H)
         except: pass
         refund_paystack(trans_id)
         if tg_user: tg_send(tg_user, "❌ 5sim no give code, your money don REFUND.")
         return jsonify({"status":"refunded", "reason":"no sms"})
-
     code, phone = result
     sent = tg_send(tg_user, f"✅ Your WhatsApp Code\nNumber: {phone}\nCode: {code}\n\nUse am now!")
     if not sent:
         refund_paystack(trans_id)
         return jsonify({"status":"refunded", "reason":"telegram failed"})
-
     return jsonify({"status":"success", "phone":phone, "code":code})
 
-# Keep your existing bot running here if you get webhook part...
 @app.route('/')
 def home(): return "Precious SMS Bot Live"
 
