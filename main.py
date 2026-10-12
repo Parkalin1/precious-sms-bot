@@ -21,7 +21,6 @@ def home():
 def start(m):
     buying.pop(m.chat.id, None)
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("🇪🇺 SELECT EUROPE:")
     markup.add("Portugal","Romania","Estonia")
     markup.add("Poland","Bulgaria","Netherlands")
     markup.add("💰 Balance")
@@ -40,7 +39,6 @@ def cancel(m):
 def handle(m):
     chat_id = m.chat.id
     txt = m.text.strip()
-
     if txt == "💰 Balance":
         try:
             r = requests.get(f"{BASE}/user/profile", headers=H, timeout=10).json()
@@ -58,16 +56,14 @@ def handle(m):
 
         def run():
             try:
-                country = txt.lower()
-                r = requests.get(f"{BASE}/user/buy/activation/country/{country}/operator/any/product/whatsapp", headers=H, timeout=20)
+                r = requests.get(f"{BASE}/user/buy/activation/country/{txt.lower()}/operator/any/product/whatsapp", headers=H, timeout=20)
                 if r.status_code!= 200:
-                    bot.send_message(chat_id, f"❌ No {country} number. Try another.")
+                    bot.send_message(chat_id, f"❌ No {txt.lower()} number.")
                     buying.pop(chat_id, None)
                     return
                 data = r.json()
                 orders[chat_id] = data['id']
-                phone = data.get('phone')
-                bot.send_message(chat_id, f"Number: {phone}\nWaiting for code... (2 mins)")
+                bot.send_message(chat_id, f"Number: {data.get('phone')}\nWaiting code...")
 
                 for _ in range(6):
                     time.sleep(20)
@@ -76,16 +72,14 @@ def handle(m):
                         chk = requests.get(f"{BASE}/user/check/{data['id']}", headers=H, timeout=20).json()
                         if chk.get('sms'):
                             code = chk['sms'][0]['code']
-                            bot.send_message(chat_id, f"✅ CODE: {code}\nNumber: {phone}")
+                            bot.send_message(chat_id, f"✅ CODE: {code}")
                             buying.pop(chat_id, None)
                             orders.pop(chat_id, None)
                             return
                     except: continue
 
-                # timeout - auto cancel
-                try: requests.get(f"{BASE}/user/cancel/{data['id']}", headers=H, timeout=10)
-                except: pass
-                bot.send_message(chat_id, "❌ No code came. Auto-cancelled & refunded.")
+                requests.get(f"{BASE}/user/cancel/{data['id']}", headers=H, timeout=10)
+                bot.send_message(chat_id, "❌ No code. Auto-cancelled & refunded.")
                 buying.pop(chat_id, None)
                 orders.pop(chat_id, None)
             except Exception as e:
@@ -94,11 +88,12 @@ def handle(m):
 
         threading.Thread(target=run).start()
 
-# Run Flask + Bot
 def run_bot():
-    bot.infinity_polling()
+    bot.remove_webhook()
+    time.sleep(2)
+    bot.infinity_polling(skip_pending=True)
 
 if __name__ == "__main__":
-    threading.Thread(target=run_bot).start()
+    threading.Thread(target=run_bot, daemon=True).start()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
