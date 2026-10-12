@@ -39,7 +39,7 @@ def cancel(m):
 def handle(m):
     chat_id = m.chat.id
     txt = m.text.strip()
-    if txt == "💰 Balance":
+    if txt in ["💰 Balance", "Balance", "/balance", "balance", "💲 Balance"]:
         try:
             r = requests.get(f"{BASE}/user/profile", headers=H, timeout=10).json()
             bot.send_message(chat_id, f"Balance: ${r.get('balance')}")
