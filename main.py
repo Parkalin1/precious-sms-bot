@@ -1,5 +1,6 @@
 import os
 import time
+import json
 import threading
 import requests
 from flask import Flask
@@ -7,13 +8,37 @@ import telebot
 from telebot import types
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-SIM5_KEY = os.getenv("SIM5_KEY", "").strip()
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 app = Flask(__name__)
 
 BASE = "https://5sim.net/v1"
 user_orders = {}
+
+PRICES = {
+    "usa": 2.0,
+    "canada": 2.0,
+    "argentina": 0.8,
+    "brazil": 1.2
+}
+
+BAL_FILE = "balances.json"
+
+def load_balances():
+    if os.path.exists(BAL_FILE):
+        try:
+            with open(BAL_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_balances(data):
+    with open(BAL_FILE, "w") as f:
+        json.dump(data, f)
+
+user_balances = load_balances()
 
 def get_headers():
     return {
@@ -24,8 +49,7 @@ def get_headers():
 def buy_number(country):
     url = f"{BASE}/user/buy/activation/{country}/any/whatsapp"
     r = requests.get(url, headers=get_headers(), timeout=30)
-    print(f"5SIM raw: {r.text[:500]}")
-    if r.status_code != 200:
+    if r.status_code!= 200:
         raise Exception(f"5SIM Error {r.status_code}: {r.text[:300]}")
     return r.json()
 
@@ -39,48 +63,64 @@ def cancel_order(order_id):
     r = requests.get(url, headers=get_headers(), timeout=20)
     return r.text
 
-def get_balance():
-    url = f"{BASE}/user/profile"
-    r = requests.get(url, headers=get_headers(), timeout=20)
-    if r.status_code == 200:
-        try:
-            return r.json().get("balance")
-        except:
-            return None
-    return None
-
 @app.route("/")
 def home():
     return "Bot is Live"
 
 @bot.message_handler(commands=['start'])
 def start(m):
-    bal = get_balance()
+    uid = str(m.chat.id)
+    if uid not in user_balances:
+        user_balances[uid] = 0.0
+        save_balances(user_balances)
+    bal = user_balances.get(uid, 0.0)
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("🇺🇸 USA", "🇨🇦 Canada", "🇦🇷 Argentina", "🇧🇷 Brazil")
-    markup.add("💰 Balance", "❌ Cancel")
-    txt = f"Welcome! Balance: ${bal}\nChoose country:" if bal is not None else "Welcome! Choose country:"
-    bot.send_message(m.chat.id, txt, reply_markup=markup)
+    markup.add("🇺🇸 USA $2.0", "🇨🇦 Canada $2.0")
+    markup.add("🇦🇷 Argentina $0.8", "🇧🇷 Brazil $1.2")
+    markup.add("💰 My Balance", "❌ Cancel")
+    bot.send_message(m.chat.id, f"Welcome!\nYour Wallet: ${bal:.2f}\n\nChoose country:", reply_markup=markup)
+
+@bot.message_handler(commands=['mybalance', 'balance'])
+def mybal(m):
+    uid = str(m.chat.id)
+    bal = user_balances.get(uid, 0.0)
+    bot.send_message(m.chat.id, f"Your wallet: ${bal:.2f}\n\nTo fund, contact admin.")
+
+@bot.message_handler(commands=['add'])
+def add_bal(m):
+    if ADMIN_ID!= 0 and m.chat.id!= ADMIN_ID:
+        return
+    try:
+        parts = m.text.split()
+        target_id = parts[1]
+        amount = float(parts[2])
+        user_balances[target_id] = user_balances.get(target_id, 0.0) + amount
+        save_balances(user_balances)
+        bot.send_message(m.chat.id, f"Added ${amount} to {target_id}. New bal: ${user_balances[target_id]:.2f}")
+        try:
+            bot.send_message(int(target_id), f"✅ Admin don add ${amount} to your wallet!\nNew balance: ${user_balances[target_id]:.2f}")
+        except:
+            pass
+    except Exception as e:
+        bot.send_message(m.chat.id, f"Usage: /add USER_ID AMOUNT\nExample: /add 123456789 5\nError: {e}")
 
 @bot.message_handler(commands=['cancel'])
 def cancel_cmd(m):
     order_id = user_orders.get(m.chat.id)
     if not order_id:
-        bot.send_message(m.chat.id, "No active order to cancel")
+        bot.send_message(m.chat.id, "No active order")
         return
-    res = cancel_order(order_id)
+    cancel_order(order_id)
     user_orders.pop(m.chat.id, None)
-    bot.send_message(m.chat.id, f"Cancelled order {order_id}\n{res[:200]}")
+    bot.send_message(m.chat.id, f"Cancelled! Order {order_id} done.")
 
 @bot.message_handler(func=lambda m: True)
 def handle(m):
     text = m.text.lower()
+    uid = str(m.chat.id)
 
-    if "balance" in text:
-        bal = get_balance()
-        bot.send_message(m.chat.id, f"Your 5SIM Balance: ${bal}")
-        return
-
+    if "my balance" in text:
+        return mybal(m)
     if "cancel" in text:
         return cancel_cmd(m)
 
@@ -95,14 +135,25 @@ def handle(m):
     else:
         return
 
-    bot.send_message(m.chat.id, f"Buying {country} number...")
+    price = PRICES.get(country, 2.0)
+    bal = user_balances.get(uid, 0.0)
+
+    if bal < price:
+        bot.send_message(m.chat.id, f"❌ Insufficient balance!\nPrice: ${price}\nYour balance: ${bal:.2f}\n\nContact admin to fund wallet.")
+        return
+
+    bot.send_message(m.chat.id, f"Buying {country} number for ${price}...")
 
     try:
         data = buy_number(country)
         phone = data.get("phone")
         order_id = data.get("id")
+
+        user_balances[uid] = bal - price
+        save_balances(user_balances)
         user_orders[m.chat.id] = order_id
-        bot.send_message(m.chat.id, f"Number: {phone}\nOrder ID: {order_id}\nWaiting for code...\nSend ❌ Cancel if you want to cancel")
+
+        bot.send_message(m.chat.id, f"✅ Number: {phone}\nOrder: {order_id}\nDeducted: ${price}\nRemaining: ${user_balances[uid]:.2f}\n\nWaiting for code...")
 
         for i in range(60):
             time.sleep(5)
@@ -110,10 +161,10 @@ def handle(m):
             sms = check.get("sms")
             if sms:
                 user_orders.pop(m.chat.id, None)
-                bot.send_message(m.chat.id, f"CODE: {sms}")
+                bot.send_message(m.chat.id, f"🔑 CODE: {sms}")
                 return
 
-        bot.send_message(m.chat.id, "No code yet. Send /cancel to cancel and get refund")
+        bot.send_message(m.chat.id, "No code yet. Send ❌ Cancel to cancel")
 
     except Exception as e:
         bot.send_message(m.chat.id, f"Error: {e}")
@@ -123,10 +174,8 @@ def run_flask():
 
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
-    print("Bot polling started...")
     while True:
         try:
             bot.infinity_polling(skip_pending=True, timeout=20, long_polling_timeout=20)
-        except Exception as e:
-            print(f"Polling error: {e}, retrying in 5s...")
+        except:
             time.sleep(5)
