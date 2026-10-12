@@ -133,5 +133,10 @@ def all_text(m):
         threading.Thread(target=buy_number, args=(chat_id, COUNTRY_MAP[low], txt), daemon=True).start()
         return
 
+def run_flask():
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+
 if __name__ == "__main__":
-    threading.Thread(target=lambda: app
+    threading.Thread(target=run_flask, daemon=True).start()
+    print("Bot polling started...")
+    bot.infinity_polling(skip_pending=True, timeout=20, long_polling_timeout=20)
