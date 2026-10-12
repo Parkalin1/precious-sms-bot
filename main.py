@@ -4,7 +4,7 @@ from flask_cors import CORS
 
 TOKEN = os.environ.get("BOT_TOKEN")
 SIM5 = os.environ.get("SIM5_KEY")
-PAYSTACK = os.environ.get("PAYSTACK_SECRET") # <-- NEW, add for Render
+PAYSTACK = os.environ.get("PAYSTACK_SECRET")
 ADMIN = int(os.environ.get("ADMIN_ID", "0"))
 BASE = "https://5sim.net/v1"
 H = {"Authorization": f"Bearer {SIM5}"}
