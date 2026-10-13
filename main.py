@@ -102,15 +102,23 @@ def start(m):
     markup.add(types.KeyboardButton("❌ Cancel"))
     bot.send_message(m.chat.id, "Welcome to Precious SMS!\n\nAmerica + Europe countries available.\nChoose country, pay with Paystack, get code sharp!", reply_markup=markup)
 
-@bot.message_handler(commands=['cancel'])
-def cancel_cmd(m):
-    order_id = user_orders.get(m.chat.id)
-    if not order_id:
-        bot.send_message(m.chat.id, "No active order")
+@bot.message_handler(commands=['mywallet', 'wallet'])
+def wallet_cmd(m):
+    bal = user_wallets.get(str(m.chat.id), 0)
+    bot.send_message(m.chat.id, f"💰 Wallet: ₦{bal}\nIf number no dey, money go enter here.")
+
+@bot.message_handler(commands=['refund'])
+def refund_cmd(m):
+    if ADMIN_ID!= 0 and m.chat.id!= ADMIN_ID:
         return
-    cancel_order(order_id)
-    user_orders.pop(m.chat.id, None)
-    bot.send_message(m.chat.id, "Cancelled!")
+    try:
+        parts = m.text.split()
+        target = parts[1]
+        amount = int(parts[2])
+        user_wallets[target] = user_wallets.get(target, 0) - amount
+        bot.send_message(m.chat.id, f"Removed ₦{amount} from {target} wallet")
+    except Exception as e:
+        bot.send_message(m.chat.id, f"Usage: /refund USER_ID AMOUNT\n{e}")
 
 @bot.message_handler(func=lambda m: True)
 def handle(m):
